@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Runtime tracking surface (plan §9 / §10) — regenerated every run, never committed
+state/*
+!state/.gitkeep

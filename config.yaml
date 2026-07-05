@@ -1,0 +1,42 @@
+# Runtime configuration (plan §15). Loaded by src/arbdetector/config.py, which
+# parses YAML float scalars directly into Decimal — money values here are exact.
+
+categories:
+  polymarket: ["geopolitics"]      # v1: the fee-free Polymarket leg (plan §3.3)
+  kalshi: ["World", "Politics"]    # Kalshi categories that overlap geopolitics; verify in milestone 2
+
+matching:
+  recall_top_k: 5
+  recall_min_similarity: 0.55
+  llm_model: "claude-fable-5"      # strong reasoning model for rule adjudication (plan §6 stage 2)
+  min_confidence: 0.80
+
+engine:
+  target_size_pairs: 500           # share-pairs to size the book-walk against
+  net_threshold_per_pair: 0.02     # only alert above this (buffers slippage + safety margin)
+
+poll:
+  discovery_interval_sec: 300
+  price_interval_sec: 5
+  backoff_base_sec: 1
+
+fees:
+  kalshi_multiplier_default: 0.07  # plan §3.1; per-category overrides can be added later
+  polymarket_fee_rates:            # plan §3.2 table; unknown categories are refused, never guessed
+    geopolitics: 0.00
+    politics: 0.04
+    crypto: 0.07
+    sports: 0.03
+    economics: 0.05
+
+alerting:
+  telegram_enabled: true
+
+tracking:
+  state_dir: "./state"             # latest.json, STATUS.txt, events.jsonl, arb.db live here
+  status_board_stdout: true        # also print the board to stdout each cycle
+  sqlite_path: "./state/arb.db"
+  structured_log_path: "./state/events.jsonl"
+  schema_version: 1
+  keep_dropped_ids: true           # persist per-reason dropped ids for tracing (costs some space)
+  drop_id_retention_cycles: 200    # trim dropped-id detail older than this to bound db growth

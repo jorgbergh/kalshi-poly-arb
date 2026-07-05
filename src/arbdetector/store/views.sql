@@ -1,0 +1,11 @@
+-- Predefined views (plan §9.8) — the "read off at a glance" layer.
+-- STUB (Milestone 8): definitions land here; STATE_SCHEMA.md is the registry.
+--
+-- v_active_opportunities  latest opp per pair currently above threshold,
+--                         joined to titles + LLM caveats
+-- v_funnel_latest         the funnel for the most recent cycle (backs the board)
+-- v_drop_breakdown_24h    stage, reason, count over last 24h ("why so few opps?")
+-- v_pair_trace            ALL rows for one pair_id: markets, verdict, latest opp,
+--                         recent drops
+-- v_opportunity_history   opps over time (spread distribution / shadow validation)
+-- v_cycle_health          per-cycle durations + error counts (regression watch)

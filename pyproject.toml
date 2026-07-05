@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "arbdetector"
+version = "0.1.0"
+description = "Cross-platform prediction-market arbitrage DETECTOR (Kalshi <-> Polymarket). Read-only: it never places trades."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic==2.11.7",
+    "PyYAML==6.0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.4.1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/arbdetector"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
