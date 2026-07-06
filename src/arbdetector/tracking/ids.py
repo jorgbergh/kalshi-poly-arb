@@ -41,3 +41,11 @@ def opp_id(pair_id_: str, direction: Direction | str, detected_ts: str) -> str:
     """ID for one detected opportunity at one point in time."""
     direction_value = Direction(direction).value
     return _sha1_hex(f"{pair_id_}:{direction_value}:{detected_ts}")[:OPP_ID_LEN]
+
+
+def rules_hash(kalshi_rules: str, poly_rules: str) -> str:
+    """Hash of both markets' full rules texts (plan §5/§6).
+
+    Half of the verdict-cache key: a pair is re-adjudicated only when this
+    changes. The unit separator keeps ("ab","") distinct from ("a","b")."""
+    return _sha1_hex(f"{kalshi_rules}\x1f{poly_rules}")[:16]

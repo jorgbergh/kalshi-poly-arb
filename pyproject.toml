@@ -9,7 +9,10 @@ description = "Cross-platform prediction-market arbitrage DETECTOR (Kalshi <-> P
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "anthropic==0.57.1",
+    "httpx==0.28.1",
     "pydantic==2.11.7",
+    "python-dotenv==1.1.0",
     "PyYAML==6.0.2",
 ]
 

@@ -1,0 +1,15 @@
+# Manual adjudication overrides (plan §6). Human always wins over the LLM.
+#
+# Keyed by pair_id (the 8-hex id shown in sweep output / v_pair_trace).
+# Values:
+#   approve           force same-event, same direction (kalshi YES == poly YES)
+#   approve_inverted  force same-event, inverted (kalshi YES == poly NO)
+#   reject            force not-same-event; the pair never reaches pricing
+#
+# Overrides are config, not cache: they are applied on every run and never
+# written into the verdicts table.
+#
+# overrides:
+#   "3f9a1b2c": reject
+
+overrides: {}

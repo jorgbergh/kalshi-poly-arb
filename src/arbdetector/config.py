@@ -16,7 +16,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 DEFAULT_CONFIG_PATH = Path("config.yaml")
 
@@ -52,15 +52,27 @@ class MatchingConfig(_StrictModel):
 
     recall_top_k: int = Field(ge=1)
     recall_min_similarity: float = Field(ge=0.0, le=1.0)
+    close_time_tolerance_days: int = Field(ge=0)
     llm_model: str
     min_confidence: float = Field(ge=0.0, le=1.0)
 
 
 class EngineConfig(_StrictModel):
-    """Signal-engine sizing and alert threshold (plan §3.4, §7)."""
+    """Signal-engine sizing, freshness, and alert threshold (plan §3.4, §7)."""
 
     target_size_pairs: Decimal = Field(gt=0)
+    min_size_pairs: Decimal = Field(gt=0)
     net_threshold_per_pair: Decimal = Field(ge=0)
+    max_book_age_sec: float = Field(gt=0)
+
+    @model_validator(mode="after")
+    def _min_not_above_target(self) -> "EngineConfig":
+        if self.min_size_pairs > self.target_size_pairs:
+            raise ValueError(
+                f"min_size_pairs ({self.min_size_pairs}) exceeds "
+                f"target_size_pairs ({self.target_size_pairs})"
+            )
+        return self
 
 
 class PollConfig(_StrictModel):

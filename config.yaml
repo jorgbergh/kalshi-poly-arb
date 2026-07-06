@@ -3,17 +3,20 @@
 
 categories:
   polymarket: ["geopolitics"]      # v1: the fee-free Polymarket leg (plan §3.3)
-  kalshi: ["World", "Politics"]    # Kalshi categories that overlap geopolitics; verify in milestone 2
+  kalshi: ["World", "Politics", "Elections"]  # verified against live categories 2026-07-05
 
 matching:
   recall_top_k: 5
-  recall_min_similarity: 0.55
-  llm_model: "claude-fable-5"      # strong reasoning model for rule adjudication (plan §6 stage 2)
+  recall_min_similarity: 0.55     # validated live 2026-07-05: real pairs score >=0.63; below is template noise
+  close_time_tolerance_days: 30    # same event skews by hours; different windows by months
+  llm_model: "claude-sonnet-5"     # adjudication model (plan §6 stage 2); fable-5 verdicts of 2026-07-06 remain cached
   min_confidence: 0.80
 
 engine:
   target_size_pairs: 500           # share-pairs to size the book-walk against
+  min_size_pairs: 1                # below this achievable size -> INSUFFICIENT_DEPTH (plan §9.4)
   net_threshold_per_pair: 0.02     # only alert above this (buffers slippage + safety margin)
+  max_book_age_sec: 30             # older books -> STALE_BOOK (matters for replayed/cached books)
 
 poll:
   discovery_interval_sec: 300
@@ -37,6 +40,6 @@ tracking:
   status_board_stdout: true        # also print the board to stdout each cycle
   sqlite_path: "./state/arb.db"
   structured_log_path: "./state/events.jsonl"
-  schema_version: 1
+  schema_version: 2                # v2: verdicts gained a `model` column (2026-07-06)
   keep_dropped_ids: true           # persist per-reason dropped ids for tracing (costs some space)
   drop_id_retention_cycles: 200    # trim dropped-id detail older than this to bound db growth

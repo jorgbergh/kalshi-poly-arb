@@ -17,7 +17,7 @@ class TestRepoConfigLoads:
         cfg = load_config(CONFIG_PATH)
         assert cfg.categories.polymarket == ["geopolitics"]
         assert cfg.matching.min_confidence == 0.80
-        assert cfg.tracking.schema_version == 1
+        assert cfg.tracking.schema_version == 2
 
     def test_money_is_exact_decimal_never_float(self):
         cfg = load_config(CONFIG_PATH)

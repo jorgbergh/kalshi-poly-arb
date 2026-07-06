@@ -89,12 +89,18 @@ class FeeModel:
 
 @dataclass
 class MatchedPair:
-    """An LLM-adjudicated cross-platform pair (plan §5, §6 stage 2)."""
+    """An LLM-adjudicated cross-platform pair (plan §5, §6 stage 2).
+
+    ``same_direction`` is a flagged addition to §5 (2026-07-06): §6's verdict
+    schema includes it and the signal engine needs it (inverted pairs swap
+    the Polymarket books), but §5's field list omitted it.
+    """
 
     kalshi: NormalizedMarket
     polymarket: NormalizedMarket
     is_same_event: bool
     confidence: float                 # 0..1 from the LLM
+    same_direction: bool              # False: YES on kalshi == NO on polymarket
     resolution_caveats: str           # LLM notes on any subtle differences
     verdict_ts: str
     rules_hash: str                   # hash of both rule texts; re-adjudicate if it changes

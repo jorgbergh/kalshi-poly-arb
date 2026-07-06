@@ -1,7 +1,11 @@
 # STATE_SCHEMA.md — registry of everything the detector tracks
 
 First draft per plan §9.10. This is the human-facing map of every entity, enum,
-stage, drop reason, table, and view. **Current `schema_version`: 1.**
+stage, drop reason, table, and view. **Current `schema_version`: 2.**
+
+Version history: **v2** (2026-07-06) — `verdicts` gained a `model` column
+recording which LLM produced each verdict (config switched fable-5 → sonnet-5
+mid-cache; pre-v2 rows read back as `''` and were all `claude-fable-5`).
 
 Change protocol (plan §9.10): additions are additive — add the enum value /
 column / table, bump `schema_version`, append here. Old rows keep their version.
@@ -104,9 +108,10 @@ All money/sizes are `Decimal`; all timestamps ISO 8601 strings.
 | `kalshi`, `polymarket` | the two `NormalizedMarket`s |
 | `is_same_event` | LLM verdict |
 | `confidence` | 0..1 from the LLM |
+| `same_direction` | `false`: YES on kalshi ≡ NO on polymarket (inverted phrasing). Flagged addition to §5 [M6] — §6's verdict has it; the engine needs it |
 | `resolution_caveats` | LLM notes on subtle rule differences (surfaced in alerts) |
 | `verdict_ts` | when adjudicated |
-| `rules_hash` | hash of both rules texts; changed hash → re-adjudicate |
+| `rules_hash` | `sha1(kalshi_rules ␟ poly_rules)[:16]` — changed hash → re-adjudicate |
 
 ### `ArbOpportunity`
 | Field | Meaning |
@@ -134,6 +139,23 @@ untracked.
 | `dropped_ids` | `DropReason → [entity/pair ids]`, lengths must match `drops`; may be empty when `keep_dropped_ids` is off |
 | `duration_ms` | stage wall time |
 
+**Recall-stage unit semantics [M5]:** the recall `StageResult` counts
+**markets** (both platforms) in and out, not pairs — the invariant needs one
+unit, and the §9.6 sketch mixes them. A market survives if it appears in ≥1
+emitted `CandidatePair`; otherwise it drops with exactly one reason
+(`CATEGORY_MISMATCH` → `NO_TIME_OVERLAP` → `LOW_SIMILARITY`, first
+applicable). The pair count is reported separately (`len(candidates)`).
+
+### `CandidatePair` — `matching/recall.py` [M5]
+
+A recalled, not-yet-adjudicated pair (in-memory; persisted into `pairs` [M8]).
+
+| Field | Meaning |
+|---|---|
+| `pair_id` | deterministic id (§1) |
+| `kalshi`, `polymarket` | the two `NormalizedMarket`s |
+| `similarity` | recall score (tf-idf cosine of titles) — NOT a same-event probability; the adjudicator's `confidence` is the verdict |
+
 ## 5. `RunState` — `tracking/runstate.py` [M8]
 
 Single source of truth per cycle; every view renders from it. Fields per plan
@@ -150,7 +172,7 @@ Single source of truth per cycle; every view renders from it. Fields per plan
 | `events.jsonl` | structured log: one JSON object per line; mandatory keys `ts`, `lvl`, `stage`, `event`, plus `entity_id`/`pair_id`/`reason` where applicable |
 | `arb.db` | SQLite store (tables + views below) |
 
-## 7. SQLite tables — `store/sqlite.py` [M8, verdicts M6]
+## 7. SQLite tables — `store/sqlite.py` [M8], `verdicts` in `matching/cache.py` [M6 ✓]
 
 All tables carry `schema_version`. Append-only ledgers; no in-place mutation
 of history.
@@ -159,7 +181,7 @@ of history.
 |---|---|---|
 | `markets` | `entity_id` PK | platform, market_id, title, category, close_time, first/last_seen_ts |
 | `pairs` | `pair_id` PK | kalshi/poly entity FKs, rules_hash, first_seen_ts |
-| `verdicts` | (`pair_id`, `rules_hash`) PK | LLM verdict fields — doubles as the LLM cache |
+| `verdicts` [M6 ✓] | (`pair_id`, `rules_hash`) PK | is_same_event, confidence, same_direction, caveats, verdict_ts, model (v2), schema_version — doubles as the LLM cache |
 | `opportunities` | `opp_id` PK | pair FK, cycle FK, direction, size, fills, fees, net, roi, detected_ts |
 | `drops` | `id` PK | cycle FK, stage, reason, entity_or_pair_id, detail_json, ts |
 | `cycles` | `cycle_id` PK | started/ended_ts, duration_ms, error_count |

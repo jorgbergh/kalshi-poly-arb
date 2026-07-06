@@ -24,12 +24,12 @@ drop reason, table, and view (plan §9.10).
 | Milestone (plan §11) | Status |
 |---|---|
 | 1. Schema + config + fee models + tracking primitives | ✅ implemented & tested |
-| 2. Kalshi client (REST, NO-bid→YES-ask reconstruction) | ⬜ stub |
-| 3. Polymarket client (Gamma + CLOB) | ⬜ stub |
-| 4. Normalization into common schema | ⬜ stub |
-| 5. Recall filter (matching stage 1) | ⬜ stub |
-| 6. LLM adjudicator + verdict cache (stage 2) | ⬜ stub |
-| 7. Book-walk + signal engine | ⬜ stub |
+| 2. Kalshi client (REST, NO-bid→YES-ask reconstruction) | ✅ implemented & tested |
+| 3. Polymarket client (Gamma + CLOB) | ✅ implemented & tested |
+| 4. Normalization into common schema | ✅ confirmed live, both platforms |
+| 5. Recall filter (matching stage 1) | ✅ implemented & tested |
+| 6. LLM adjudicator + verdict cache (stage 2) | ✅ implemented & tested |
+| 7. Book-walk + signal engine | 🟡 partial: §3.4 net margin, both directions, top-of-book only |
 | 8. Tracking & state layer (RunState, board, store) | ⬜ stub (primitives done) |
 | 9. Alerting (Telegram + console) | ⬜ stub |
 | 10. Orchestration loop | ⬜ stub |
@@ -47,6 +47,28 @@ pytest                           # milestone-1 suite; future milestones show as 
 
 Tests are pure/offline — no network, no API keys needed. Runtime secrets (LLM key,
 Telegram token) go in `.env`, copied from [.env.example](.env.example).
+
+Live smoke check (read-only, no auth — prints best derived YES/NO asks):
+
+```bash
+python -m arbdetector.clients.kalshi --limit 3            # discover World/Politics
+python -m arbdetector.clients.kalshi --ticker KXELONMARS-99
+python -m arbdetector.clients.polymarket --limit 3        # discover geopolitics
+python -m arbdetector.clients.polymarket --slug putin-out-before-2027
+
+# discover both platforms, generate candidate pairs + the recall funnel:
+python -m arbdetector.matching.recall --top 20
+
+# the full detection sweep: discover -> recall -> LLM-adjudicate (cached,
+# needs ANTHROPIC_API_KEY in .env) -> price blessed pairs net of fees:
+python -m arbdetector.matching.adjudicator --margins
+
+# price one HAND-MATCHED pair live, both directions, net of fees:
+python -m arbdetector.engine.signal \
+    --kalshi-ticker KXZELENSKYPUTIN-29-27 \
+    --poly-slug where-will-zelenskyy-and-putin-meet-next \
+    --poly-question "not meet" --poly-inverted
+```
 
 ## Conventions (enforced, see plan §4/§13)
 
