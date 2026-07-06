@@ -29,7 +29,7 @@ drop reason, table, and view (plan §9.10).
 | 4. Normalization into common schema | ✅ confirmed live, both platforms |
 | 5. Recall filter (matching stage 1) | ✅ implemented & tested |
 | 6. LLM adjudicator + verdict cache (stage 2) | ✅ implemented & tested |
-| 7. Book-walk + signal engine | 🟡 partial: §3.4 net margin, both directions, top-of-book only |
+| 7. Book-walk + signal engine | ✅ implemented & tested (depth-walked fills, partial-fill realism, record/replay) |
 | 8. Tracking & state layer (RunState, board, store) | ⬜ stub (primitives done) |
 | 9. Alerting (Telegram + console) | ⬜ stub |
 | 10. Orchestration loop | ⬜ stub |
@@ -60,8 +60,12 @@ python -m arbdetector.clients.polymarket --slug putin-out-before-2027
 python -m arbdetector.matching.recall --top 20
 
 # the full detection sweep: discover -> recall -> LLM-adjudicate (cached,
-# needs ANTHROPIC_API_KEY in .env) -> price blessed pairs net of fees:
+# needs ANTHROPIC_API_KEY in .env) -> walk books -> threshold -> opportunities:
 python -m arbdetector.matching.adjudicator --margins
+
+# record books during a sweep, then re-run the engine offline from them:
+python -m arbdetector.matching.adjudicator --margins --record state/books.json
+python -m arbdetector.matching.adjudicator --replay state/books.json
 
 # price one HAND-MATCHED pair live, both directions, net of fees:
 python -m arbdetector.engine.signal \

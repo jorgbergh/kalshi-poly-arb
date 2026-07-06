@@ -146,6 +146,16 @@ emitted `CandidatePair`; otherwise it drops with exactly one reason
 (`CATEGORY_MISMATCH` → `NO_TIME_OVERLAP` → `LOW_SIMILARITY`, first
 applicable). The pair count is reported separately (`len(candidates)`).
 
+**Price/threshold stage semantics [M7]:** units are **pairs** throughout.
+`price` (in `engine/signal.py::run_price`) fetches/replays books, applies the
+`same_direction` swap, walks both directions to `engine.target_size_pairs`;
+drops `API_ERROR` → `STALE_BOOK` (older than `engine.max_book_age_sec`) →
+`EMPTY_BOOK` (no quotable direction) → `INSUFFICIENT_DEPTH` (no direction
+fills `engine.min_size_pairs`). `threshold` (`run_threshold`) applies the
+strictly-greater §3.4 rule; drops `NEGATIVE_MARGIN` → `BELOW_THRESHOLD`;
+survivors are §5 `ArbOpportunity` objects (their §9.2 id comes from
+`opportunity_id()` — the id is derived, not a field, per §5).
+
 ### `CandidatePair` — `matching/recall.py` [M5]
 
 A recalled, not-yet-adjudicated pair (in-memory; persisted into `pairs` [M8]).
