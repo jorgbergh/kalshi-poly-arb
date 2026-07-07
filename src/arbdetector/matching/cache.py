@@ -16,20 +16,8 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-_CREATE_TABLE = """
-CREATE TABLE IF NOT EXISTS verdicts (
-    pair_id        TEXT    NOT NULL,
-    rules_hash     TEXT    NOT NULL,
-    is_same_event  INTEGER NOT NULL,
-    confidence     REAL    NOT NULL,
-    same_direction INTEGER NOT NULL,
-    caveats        TEXT    NOT NULL,
-    verdict_ts     TEXT    NOT NULL,
-    model          TEXT    NOT NULL DEFAULT '',
-    schema_version INTEGER NOT NULL,
-    PRIMARY KEY (pair_id, rules_hash)
-)
-"""
+# Canonical verdicts DDL lives in the store (§9.8) — one source of truth.
+from arbdetector.store.sqlite import VERDICTS_TABLE_SQL as _CREATE_TABLE
 
 # Additive schema-v2 migration (plan §9.10): verdicts written before
 # 2026-07-06 predate the column and read back as '' (they were claude-fable-5).

@@ -22,6 +22,7 @@ poll:
   discovery_interval_sec: 300
   price_interval_sec: 5
   backoff_base_sec: 1
+  max_backoff_sec: 60              # cap for exponential backoff on API errors (M10)
 
 fees:
   kalshi_multiplier_default: 0.07  # plan §3.1; per-category overrides can be added later
@@ -34,6 +35,8 @@ fees:
 
 alerting:
   telegram_enabled: true
+  console_enabled: true            # colored console alerts (no deps, always available)
+  material_change_per_pair: 0.005  # re-alert only when net/pair moves >= this vs last alert
 
 tracking:
   state_dir: "./state"             # latest.json, STATUS.txt, events.jsonl, arb.db live here

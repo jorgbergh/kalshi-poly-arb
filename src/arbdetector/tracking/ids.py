@@ -12,8 +12,12 @@ market/pair/opportunity can be traced end-to-end (e.g. via ``v_pair_trace``).
 from __future__ import annotations
 
 import hashlib
+from typing import TYPE_CHECKING
 
 from arbdetector.schema import Direction, Platform
+
+if TYPE_CHECKING:
+    from arbdetector.schema import MatchedPair
 
 ENTITY_ID_LEN = 8
 PAIR_ID_LEN = 8
@@ -41,6 +45,15 @@ def opp_id(pair_id_: str, direction: Direction | str, detected_ts: str) -> str:
     """ID for one detected opportunity at one point in time."""
     direction_value = Direction(direction).value
     return _sha1_hex(f"{pair_id_}:{direction_value}:{detected_ts}")[:OPP_ID_LEN]
+
+
+def matched_pair_id(pair: "MatchedPair") -> str:
+    """The §9.2 pair id for an adjudicated pair (convenience over entity_id
+    + pair_id; lives here so the tracking spine never imports the engine)."""
+    return pair_id(
+        entity_id(Platform.KALSHI, pair.kalshi.market_id),
+        entity_id(Platform.POLYMARKET, pair.polymarket.market_id),
+    )
 
 
 def rules_hash(kalshi_rules: str, poly_rules: str) -> str:

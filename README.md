@@ -30,9 +30,9 @@ drop reason, table, and view (plan §9.10).
 | 5. Recall filter (matching stage 1) | ✅ implemented & tested |
 | 6. LLM adjudicator + verdict cache (stage 2) | ✅ implemented & tested |
 | 7. Book-walk + signal engine | ✅ implemented & tested (depth-walked fills, partial-fill realism, record/replay) |
-| 8. Tracking & state layer (RunState, board, store) | ⬜ stub (primitives done) |
-| 9. Alerting (Telegram + console) | ⬜ stub |
-| 10. Orchestration loop | ⬜ stub |
+| 8. Tracking & state layer (RunState, board, store) | ✅ implemented & tested |
+| 9. Alerting (Telegram + console) | ✅ implemented & tested |
+| 10. Orchestration loop | ✅ implemented & tested |
 
 ## Setup & tests
 
@@ -48,6 +48,12 @@ pytest                           # milestone-1 suite; future milestones show as 
 Tests are pure/offline — no network, no API keys needed. Runtime secrets (LLM key,
 Telegram token) go in `.env`, copied from [.env.example](.env.example).
 
+**Telegram alerts** (optional — console alerts work without it): create a bot via
+[@BotFather](https://t.me/BotFather) (`/newbot` → copy the token), press Start on
+your new bot, get your numeric chat id from [@userinfobot](https://t.me/userinfobot),
+then set `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` in `.env`. Missing keys → Telegram
+silently no-ops.
+
 Live smoke check (read-only, no auth — prints best derived YES/NO asks):
 
 ```bash
@@ -59,9 +65,15 @@ python -m arbdetector.clients.polymarket --slug putin-out-before-2027
 # discover both platforms, generate candidate pairs + the recall funnel:
 python -m arbdetector.matching.recall --top 20
 
-# the full detection sweep: discover -> recall -> LLM-adjudicate (cached,
-# needs ANTHROPIC_API_KEY in .env) -> walk books -> threshold -> opportunities:
+# the full detection sweep (one cycle): discover -> recall -> LLM-adjudicate
+# (cached, needs ANTHROPIC_API_KEY in .env) -> walk books -> threshold -> alert:
 python -m arbdetector.matching.adjudicator --margins
+
+# THE DETECTOR — the orchestration loop (slow discovery + fast re-price cadences):
+python -m arbdetector.main                 # unbounded daemon (Ctrl-C to stop)
+python -m arbdetector.main --once          # a single cycle
+python -m arbdetector.main --max-cycles 3  # bounded run
+python -m arbdetector.main --replay state/books.json  # offline price loop
 
 # record books during a sweep, then re-run the engine offline from them:
 python -m arbdetector.matching.adjudicator --margins --record state/books.json

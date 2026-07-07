@@ -45,8 +45,8 @@ from arbdetector.schema import (
     OrderBookLevel,
     Platform,
 )
-from arbdetector.tracking import DropReason, Stage, StageResult, entity_id, pair_id
-from arbdetector.tracking.ids import opp_id
+from arbdetector.tracking import DropReason, Stage, StageResult
+from arbdetector.tracking.ids import matched_pair_id, opp_id
 
 _HUNDRED = Decimal("100")
 
@@ -57,14 +57,6 @@ def _now_utc() -> datetime:
 
 def _now_iso() -> str:
     return _now_utc().isoformat(timespec="seconds")
-
-
-def matched_pair_id(pair: MatchedPair) -> str:
-    """The deterministic §9.2 pair id for an adjudicated pair."""
-    return pair_id(
-        entity_id(Platform.KALSHI, pair.kalshi.market_id),
-        entity_id(Platform.POLYMARKET, pair.polymarket.market_id),
-    )
 
 
 def opportunity_id(opportunity: ArbOpportunity) -> str:

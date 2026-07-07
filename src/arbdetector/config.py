@@ -81,6 +81,7 @@ class PollConfig(_StrictModel):
     discovery_interval_sec: int = Field(gt=0)
     price_interval_sec: int = Field(gt=0)
     backoff_base_sec: float = Field(gt=0)
+    max_backoff_sec: float = Field(default=60.0, gt=0)
 
 
 class FeesConfig(_StrictModel):
@@ -103,7 +104,12 @@ class FeesConfig(_StrictModel):
 
 
 class AlertingConfig(_StrictModel):
+    """Alerting toggles + de-dup sensitivity (plan §8). The two non-telegram
+    keys are flagged additions to the §15 sketch."""
+
     telegram_enabled: bool
+    console_enabled: bool = True
+    material_change_per_pair: Decimal = Field(default=Decimal("0.005"), ge=0)
 
 
 class TrackingConfig(_StrictModel):

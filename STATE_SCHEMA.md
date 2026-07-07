@@ -146,6 +146,25 @@ emitted `CandidatePair`; otherwise it drops with exactly one reason
 (`CATEGORY_MISMATCH` → `NO_TIME_OVERLAP` → `LOW_SIMILARITY`, first
 applicable). The pair count is reported separately (`len(candidates)`).
 
+**Loop cadence & cycle timing [M10]:** the daemon (`main.run_loop`) refreshes
+the blessed set on the slow `poll.discovery_interval_sec` cadence and re-prices
+it every `poll.price_interval_sec`; discovery stage-results are carried forward
+onto price-only ticks so every persisted cycle shows all six funnel stages.
+`RunState.started_ts` is the **process** start (drives board uptime);
+`cycle_ts` is the per-tick time. Each tick is one `cycles` + 6 `stage_stats`
+rows. API failures back off exponentially (`poll.backoff_base_sec` →
+`poll.max_backoff_sec`) and never crash the loop. The sweep
+(`adjudicator._smoke`) and the loop share one implementation via
+`arbdetector.pipeline` (`run_discovery` / `run_price_alert` / `persist_cycle`).
+
+**Alert-stage semantics [M9]:** units are **pairs**. `run_alert` sends each
+threshold survivor that is NEW or materially changed (net/pair moved ≥
+`alerting.material_change_per_pair` vs. the last delivered alert for the same
+`(pair_id, direction)` — read from the `alerts` table). Unchanged repeats drop
+as `DUPLICATE`. Per-sink send failures feed the cycle's `error_count`, never a
+silent DUPLICATE. This is the final funnel stage — the board now renders all
+six.
+
 **Price/threshold stage semantics [M7]:** units are **pairs** throughout.
 `price` (in `engine/signal.py::run_price`) fetches/replays books, applies the
 `same_direction` swap, walks both directions to `engine.target_size_pairs`;
@@ -166,38 +185,42 @@ A recalled, not-yet-adjudicated pair (in-memory; persisted into `pairs` [M8]).
 | `kalshi`, `polymarket` | the two `NormalizedMarket`s |
 | `similarity` | recall score (tf-idf cosine of titles) — NOT a same-event probability; the adjudicator's `confidence` is the verdict |
 
-## 5. `RunState` — `tracking/runstate.py` [M8]
+## 5. `RunState` — `tracking/runstate.py` [M8 ✓]
 
 Single source of truth per cycle; every view renders from it. Fields per plan
 §9.5: `schema_version`, `cycle_id`, `started_ts`, `cycle_ts`, `funnel`
 (ordered `StageResult`s), `active_opportunities`, `health`, `cache_stats`,
-`store_stats`. Serialized atomically (temp file + rename) to `state/latest.json`.
+`store_stats`. Serialized atomically (temp file + `os.replace`) to
+`state/latest.json`. **Serialization note:** opportunities serialize as
+board-ready summaries (ids, titles, exact money strings) — the full book
+snapshot lives in `opportunities.book_snapshot_json`, per §8.
 
-## 6. State files — `state/` (gitignored) [M8]
+## 6. State files — `state/` (gitignored) [M8 ✓]
 
 | File | Contents |
 |---|---|
 | `latest.json` | current `RunState` snapshot, atomic-written each cycle |
-| `STATUS.txt` | plain-text status board rendered from `RunState` |
+| `STATUS.txt` | plain-text status board rendered from `RunState` (generic over the funnel) |
 | `events.jsonl` | structured log: one JSON object per line; mandatory keys `ts`, `lvl`, `stage`, `event`, plus `entity_id`/`pair_id`/`reason` where applicable |
 | `arb.db` | SQLite store (tables + views below) |
 
-## 7. SQLite tables — `store/sqlite.py` [M8], `verdicts` in `matching/cache.py` [M6 ✓]
+## 7. SQLite tables — `store/sqlite.py` [M8 ✓] (verdicts DDL canonical here, shared with `matching/cache.py`)
 
 All tables carry `schema_version`. Append-only ledgers; no in-place mutation
-of history.
+of history. Money/sizes are stored as TEXT (Decimal strings), never REAL.
 
 | Table | Key | Contents |
 |---|---|---|
 | `markets` | `entity_id` PK | platform, market_id, title, category, close_time, first/last_seen_ts |
 | `pairs` | `pair_id` PK | kalshi/poly entity FKs, rules_hash, first_seen_ts |
 | `verdicts` [M6 ✓] | (`pair_id`, `rules_hash`) PK | is_same_event, confidence, same_direction, caveats, verdict_ts, model (v2), schema_version — doubles as the LLM cache |
-| `opportunities` | `opp_id` PK | pair FK, cycle FK, direction, size, fills, fees, net, roi, detected_ts |
-| `drops` | `id` PK | cycle FK, stage, reason, entity_or_pair_id, detail_json, ts |
+| `opportunities` | `opp_id` PK | pair FK, cycle FK, direction, size, fills, fees, net, roi, detected_ts, **book_snapshot_json** (additive: §8 requires the full book with every flagged opportunity) |
+| `drops` | `id` PK | cycle FK, stage, reason, entity_or_pair_id, **count** (additive: per-item rows carry count=1 + an id; with `keep_dropped_ids` off, one aggregate row per reason carries the count with NULL id — views SUM(count) so both shapes read identically), detail_json, ts |
 | `cycles` | `cycle_id` PK | started/ended_ts, duration_ms, error_count |
 | `stage_stats` | (`cycle_id`, `stage`) PK | n_in, n_out, duration_ms per stage per cycle |
+| `alerts` [M9] | `id` PK | pair_id, direction, opp_id, net_per_pair, roi_pct, size, cycle_id, alerted_ts, channels — the de-dup memory: `last_alert(pair_id, direction)` is the DUPLICATE lookup, restart-safe |
 
-## 8. Views — `store/views.sql` [M8]
+## 8. Views — `store/views.sql` [M8 ✓]
 
 One definition per "thing to look at"; board and any future dashboard read
 these same views.

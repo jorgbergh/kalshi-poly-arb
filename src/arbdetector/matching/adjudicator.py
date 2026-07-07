@@ -262,10 +262,18 @@ def run_adjudicate(
 
 
 def _smoke(argv: Sequence[str] | None = None) -> None:
+    """One-shot detection sweep (a single cycle), built on the shared pipeline.
+
+    Same code path as the M10 loop (:mod:`arbdetector.pipeline`), so what the
+    sweep prints is exactly what the daemon persists — plus the sweep's verbose
+    per-stage prints and the ``--filter``/``--limit``/``--record``/``--replay``
+    debug flags.
+    """
     import argparse
 
     from dotenv import load_dotenv
 
+    from arbdetector.alerting import build_alerters
     from arbdetector.clients.kalshi import KalshiClient
     from arbdetector.clients.polymarket import PolymarketClient
     from arbdetector.config import load_config
@@ -273,14 +281,14 @@ def _smoke(argv: Sequence[str] | None = None) -> None:
         dump_recordings,
         live_book_fetcher,
         load_recordings,
-        opportunity_id,
         recording_fetcher,
         replay_fetcher,
-        run_price,
-        run_threshold,
     )
     from arbdetector.fees import build_fee_registry
-    from arbdetector.matching.recall import run_recall
+    from arbdetector.pipeline import now_iso, persist_cycle, run_discovery, run_price_alert
+    from arbdetector.store.sqlite import Store
+    from arbdetector.tracking import DropReason
+    from arbdetector.tracking.structlog import StructuredLogger
 
     parser = argparse.ArgumentParser(
         description="Live detection sweep: discover, recall, LLM-adjudicate (cached), "
@@ -299,131 +307,102 @@ def _smoke(argv: Sequence[str] | None = None) -> None:
     load_dotenv()
     config = load_config(args.config)
 
-    with KalshiClient() as kalshi_client:
-        kalshi_markets = kalshi_client.discover_markets(config.categories.kalshi)
-    with PolymarketClient() as poly_client:
-        poly_markets = poly_client.discover_markets(config.categories.polymarket)
-    candidates, recall_result = run_recall(
-        kalshi_markets, poly_markets, matching=config.matching, categories=config.categories
-    )
-    print(
-        f"recall: {recall_result.n_in} markets in -> {len(candidates)} candidate pairs "
-        f"[{recall_result.duration_ms:.0f}ms]"
-    )
-
-    if args.filter:
-        needle = args.filter.lower()
-        candidates = [
-            c
-            for c in candidates
-            if needle in c.kalshi.title.lower() or needle in c.polymarket.title.lower()
-        ]
-        print(f"filter {args.filter!r}: {len(candidates)} pairs")
-    if args.limit is not None:
-        candidates = candidates[: args.limit]
-
-    overrides = load_overrides()
-    with VerdictCache(
-        config.tracking.sqlite_path, schema_version=config.tracking.schema_version
-    ) as cache:
-        adjudicator = Adjudicator(model=config.matching.llm_model, cache=cache)
-        blessed, result = run_adjudicate(
-            candidates,
-            adjudicator=adjudicator,
-            min_confidence=config.matching.min_confidence,
-            overrides=overrides,
-        )
-        drops = ", ".join(f"{r.value}={n}" for r, n in sorted(result.drops.items()))
-        print(
-            f"adjudicate: in={result.n_in} blessed={result.n_out} "
-            f"[api={adjudicator.api_calls} cached={adjudicator.cache_hits} "
-            f"verdicts_in_db={cache.count()}] [{result.duration_ms:.0f}ms]\n"
-            f"  drops: {drops or '(none)'}\n"
-        )
-
-    for mp in blessed:
-        direction_note = "" if mp.same_direction else "  [INVERTED]"
-        print(f"[{mp.rules_hash[:8]}] conf={mp.confidence:.2f}{direction_note}")
-        print(f"  K: {mp.kalshi.title[:86]}")
-        print(f"  P: {mp.polymarket.title[:86]}")
-        if mp.resolution_caveats:
-            print(f"  caveats: {mp.resolution_caveats[:160]}")
-
-    if not ((args.margins or args.record or args.replay) and blessed):
-        return
-
-    source = f"replay of {args.replay}" if args.replay else "live books"
-    print(f"\npricing blessed pairs, walking depth for {config.engine.target_size_pairs} "
-          f"pairs ({source}):")
-    registry = build_fee_registry(config.fees)
-
-    kalshi_client = poly_client = None
-    price_now = None  # wall clock for live books
-    if args.replay:
-        recordings = load_recordings(args.replay)
-        fetcher = replay_fetcher(recordings)
-        # staleness relative to the recording's own clock: wall-clock age is
-        # meaningless offline, but intra-recording skew still counts
-        if recordings:
-            price_now = max(books.fetched_at for books in recordings.values())
-    else:
-        kalshi_client, poly_client = KalshiClient(), PolymarketClient()
-        fetcher = live_book_fetcher(kalshi_client, poly_client)
-    sink: dict = {}
-    if args.record:
-        fetcher = recording_fetcher(fetcher, sink)
+    kalshi_client = KalshiClient()
+    poly_client = PolymarketClient()
+    cache = VerdictCache(config.tracking.sqlite_path, schema_version=config.tracking.schema_version)
+    store = Store(config.tracking.sqlite_path, schema_version=config.tracking.schema_version)
+    alerters = build_alerters(config.alerting)
+    fee_registry = build_fee_registry(config.fees)
+    logger = StructuredLogger(config.tracking.structured_log_path)
 
     try:
-        priced, price_result = run_price(
-            blessed,
-            fetch_books=fetcher,
-            target_size=config.engine.target_size_pairs,
-            min_size=config.engine.min_size_pairs,
-            max_book_age_sec=config.engine.max_book_age_sec,
-            fee_registry=registry,
-            now=price_now,
+        discovery = run_discovery(
+            kalshi_client, poly_client, cache=cache, config=config,
+            title_filter=args.filter, candidate_limit=args.limit,
         )
+        blessed = discovery.blessed
+        cs = discovery.cache_stats
+        adj = discovery.adjudicate_result
+        print(f"recall: {discovery.recall_result.n_in} markets -> {adj.n_in} candidate pairs "
+              f"[{discovery.recall_result.duration_ms:.0f}ms]")
+        drops = ", ".join(f"{r.value}={n}" for r, n in sorted(adj.drops.items()))
+        print(f"adjudicate: in={adj.n_in} blessed={adj.n_out} "
+              f"[api={cs['api_calls']} cached={cs['cache_hits']} "
+              f"verdicts_in_db={cs['verdicts_in_db']}] [{adj.duration_ms:.0f}ms]\n"
+              f"  drops: {drops or '(none)'}\n")
+        for mp in blessed:
+            note = "" if mp.same_direction else "  [INVERTED]"
+            print(f"[{mp.rules_hash[:8]}] conf={mp.confidence:.2f}{note}")
+            print(f"  K: {mp.kalshi.title[:86]}")
+            print(f"  P: {mp.polymarket.title[:86]}")
+            if mp.resolution_caveats:
+                print(f"  caveats: {mp.resolution_caveats[:160]}")
+
+        if not ((args.margins or args.record or args.replay) and blessed):
+            return
+
+        source = f"replay of {args.replay}" if args.replay else "live books"
+        print(f"\npricing blessed pairs, walking depth for {config.engine.target_size_pairs} "
+              f"pairs ({source}):")
+
+        price_now = None
+        if args.replay:
+            recordings = load_recordings(args.replay)
+            fetcher = replay_fetcher(recordings)
+            if recordings:  # freshness relative to the recording's own clock
+                price_now = max(b.fetched_at for b in recordings.values())
+        else:
+            fetcher = live_book_fetcher(kalshi_client, poly_client)
+        sink: dict = {}
+        if args.record:
+            fetcher = recording_fetcher(fetcher, sink)
+
+        cycle_ts = now_iso()
+        cycle_started_perf = time.perf_counter()
+        cycle_id = store.begin_cycle(cycle_ts)
+
+        print("\nALERTS:")
+        price = run_price_alert(
+            blessed, fetch_books=fetcher, store=store, alerters=alerters,
+            fee_registry=fee_registry, config=config, cycle_id=cycle_id, ts=cycle_ts,
+            price_now=price_now,
+        )
+
+        pr, th, al = price.price_result, price.threshold_result, price.alert_result
+        print(f"price: in={pr.n_in} out={pr.n_out} [{pr.duration_ms:.0f}ms]  "
+              f"drops: {', '.join(f'{r.value}={n}' for r, n in sorted(pr.drops.items())) or '(none)'}")
+        print(f"threshold (net > {config.engine.net_threshold_per_pair}): in={th.n_in} out={th.n_out}"
+              f"  drops: {', '.join(f'{r.value}={n}' for r, n in sorted(th.drops.items())) or '(none)'}")
+        for mp, q in sorted(price.priced, key=lambda item: item[1].net_per_pair, reverse=True):
+            marker = " <-- OPPORTUNITY" if q.net_per_pair > config.engine.net_threshold_per_pair else ""
+            inv = "" if mp.same_direction else " [inv]"
+            partial = "" if q.size >= config.engine.target_size_pairs else " (partial)"
+            print(f"  net/pair ${q.net_per_pair:+.4f}  roi {q.roi_pct:+6.2f}%  "
+                  f"size {q.size:>9.2f}{partial}  {q.direction.value}{inv}  "
+                  f"conf {mp.confidence:.2f}  {mp.kalshi.title[:52]}{marker}")
+        n_dup = al.drops.get(DropReason.DUPLICATE, 0)
+        print(f"\nalert: in={al.n_in} sent={al.n_out} duplicate={n_dup} "
+              f"send_errors={price.send_errors}")
+
+        if args.record:
+            dump_recordings(sink, args.record)
+            print(f"\nrecorded {len(sink)} pair books -> {args.record}")
+
+        persist_cycle(
+            store, logger, cycle_id=cycle_id,
+            funnel=discovery.stages + price.stages, discovery=discovery, price=price,
+            config=config, started_ts=cycle_ts, cycle_ts=cycle_ts,
+            duration_ms=(time.perf_counter() - cycle_started_perf) * 1000,
+            health={"kalshi": "ok", "polymarket": "ok",
+                    "books": "replay" if args.replay else "live"},
+        )
+        print(f"\ncycle #{cycle_id} persisted -> {config.tracking.state_dir}/latest.json, "
+              f"STATUS.txt, events.jsonl, arb.db")
     finally:
-        for client in (kalshi_client, poly_client):
-            if client is not None:
-                client.close()
-
-    drops = ", ".join(f"{r.value}={n}" for r, n in sorted(price_result.drops.items()))
-    print(f"price: in={price_result.n_in} out={price_result.n_out} "
-          f"[{price_result.duration_ms:.0f}ms]  drops: {drops or '(none)'}")
-
-    opportunities, threshold_result = run_threshold(
-        priced, threshold=config.engine.net_threshold_per_pair
-    )
-    drops = ", ".join(f"{r.value}={n}" for r, n in sorted(threshold_result.drops.items()))
-    print(f"threshold (net > {config.engine.net_threshold_per_pair}): "
-          f"in={threshold_result.n_in} out={threshold_result.n_out}  drops: {drops or '(none)'}\n")
-
-    for mp, q in sorted(priced, key=lambda item: item[1].net_per_pair, reverse=True):
-        marker = " <-- OPPORTUNITY" if q.net_per_pair > config.engine.net_threshold_per_pair else ""
-        inv = "" if mp.same_direction else " [inv]"
-        partial = "" if q.size >= config.engine.target_size_pairs else " (partial)"
-        print(
-            f"  net/pair ${q.net_per_pair:+.4f}  roi {q.roi_pct:+6.2f}%  "
-            f"size {q.size:>9.2f}{partial}  {q.direction.value}{inv}  "
-            f"conf {mp.confidence:.2f}  {mp.kalshi.title[:52]}{marker}"
-        )
-
-    if opportunities:
-        print("\nOPPORTUNITIES:")
-        for opp in opportunities:
-            print(
-                f"  [{opportunity_id(opp)}] {opp.direction.value}  size {opp.size:.2f}  "
-                f"fills YES@{opp.fill_yes:.4f}+NO@{opp.fill_no:.4f}  "
-                f"net/pair ${opp.net_per_pair:+.4f}  roi {opp.roi_pct:+.2f}%  "
-                f"detected {opp.detected_ts}"
-            )
-            if opp.pair.resolution_caveats:
-                print(f"    caveats: {opp.pair.resolution_caveats[:200]}")
-
-    if args.record:
-        dump_recordings(sink, args.record)
-        print(f"\nrecorded {len(sink)} pair books -> {args.record}")
+        for closeable in (kalshi_client, poly_client, cache, store, *alerters):
+            close = getattr(closeable, "close", None)
+            if callable(close):
+                close()
 
 
 if __name__ == "__main__":
