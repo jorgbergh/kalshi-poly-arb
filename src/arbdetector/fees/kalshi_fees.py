@@ -12,6 +12,14 @@
   parameter, never a constant (plan §3.1).
 - Maker fees (~25% of taker) are not modeled in v1: the detector assumes
   taker fills on both legs, which is the conservative choice.
+
+Live fee-schedule check (2026-07-08): the general taker formula and 0.07
+coefficient above were confirmed against Kalshi's published schedule (peak
+1.75c/contract at P=0.50, maker = 25% of taker). CAVEAT: some Kalshi series
+(notably sports and financial-index markets) use a different multiplier that
+this default does not model — verify per-series before trusting a
+non-standard category. Polymarket's schedule was verified exactly, incl.
+geopolitics = 0. See fees/polymarket_fees.py.
 """
 
 from __future__ import annotations
